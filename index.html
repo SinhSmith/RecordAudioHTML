@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>Record/Encode Audio</title>
+
+    <link href="bootstrap/css/bootstrap.css" rel="stylesheet" type="text/css" />
+  <style type='text/css'>
+    ul { list-style: none; }
+    #recordingslist audio { display: block; margin-bottom: 10px; }
+    canvas {
+        display: inline-block;
+        background: #202020;
+        width: 95%;
+        height: 45%;
+        box-shadow: 0px 0px 10px blue;
+    }
+  </style>
+
+</head>
+<body class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <h1>Recording Audio</h1>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-12">
+            <canvas id="analyser" width="500" height="150"></canvas>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-12">
+            <button type="button" class="btn btn-lg glyphicon glyphicon-play" onclick="startRecording(this);">Record</button>
+            <button type="button" class="btn btn-lg glyphicon glyphicon-stop" onclick="stopRecording(this);" disabled>Stop</button>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6">
+            <h2>Result Recordings</h2>
+        </div>
+        <div class="col-md-6">
+            <h2>Log</h2>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6">
+            <ul id="recordingslist"></ul>
+        </div>
+        <div class="col-md-6">
+            <pre id="log"></pre>
+        </div>
+    </div>
+
+  <script>
+
+  function logHTML(e, data) {
+    log.innerHTML += "\n" + e + " " + (data || '');
+  }
+  var audioContext;
+  var audioRecorder;
+  var analyserContext = null;
+
+  var _realAudioInput;
+
+
+  function handlerStartUserMedia(stream) {
+
+    console.log('handlerStartUserMedia');
+    console.log('sampleRate:'+ audioContext.sampleRate);
+
+    // MEDIA STREAM SOURCE -> ZERO GAIN >
+    _realAudioInput = audioContext.createMediaStreamSource(stream);
+
+    audioRecorder = new Recorder(_realAudioInput);
+
+
+  }
+
+  function handlerErrorUserMedia(e) {
+      logHTML('No live audio input: ' + e);
+  }
+
+
+  function startRecording(button) {
+
+    if(!audioRecorder)
+      return;
+    
+ 
+    audioRecorder && audioRecorder.record();
+
+    //GUI
+    button.disabled = true;
+    button.nextElementSibling.disabled = false;
+
+      //Clear log
+      log.innerHTML = "";
+
+    logHTML('Recording...');
+
+
+  }
+
+  function stopRecording(button) {
+
+    if(!audioRecorder)
+      return;
+
+
+    audioRecorder && audioRecorder.stop();
+
+    //GUI
+    button.disabled = true;
+    button.previousElementSibling.disabled = false;
+
+    logHTML('Stopped recording.');
+ 
+
+  }
+
+  function updateAnalysers(time) {
+      if (!analyserContext) {
+          var canvas = document.getElementById("analyser");
+          canvasWidth = canvas.width;
+          canvasHeight = canvas.height;
+          analyserContext = canvas.getContext('2d');
+      }
+
+      // analyzer draw code here
+      {
+          var SPACING = 3;
+          var BAR_WIDTH = 1;
+          var numBars = Math.round(canvasWidth / SPACING);
+          var freqByteData = new Uint8Array(analyserNode.frequencyBinCount);
+
+          analyserNode.getByteFrequencyData(freqByteData);
+
+          analyserContext.clearRect(0, 0, canvasWidth, canvasHeight);
+          analyserContext.fillStyle = '#F6D565';
+          analyserContext.lineCap = 'round';
+          var multiplier = analyserNode.frequencyBinCount / numBars;
+
+          // Draw rectangle for each frequency bin.
+          for (var i = 0; i < numBars; ++i) {
+              var magnitude = 0;
+              var offset = Math.floor( i * multiplier );
+              // gotta sum/average the block, or we miss narrow-bandwidth spikes
+              for (var j = 0; j< multiplier; j++)
+                  magnitude += freqByteData[offset + j];
+              magnitude = magnitude / multiplier;
+              var magnitude2 = freqByteData[i * multiplier];
+              analyserContext.fillStyle = "hsl( " + Math.round((i*360)/numBars) + ", 100%, 50%)";
+              analyserContext.fillRect(i * SPACING, canvasHeight, BAR_WIDTH, -magnitude);
+          }
+      }
+
+      rafID = window.requestAnimationFrame( updateAnalysers );
+  }
+
+  function gotStream(stream) {
+      inputPoint = audioContext.createGain();
+
+      // Create an AudioNode from the stream.
+      realAudioInput = audioContext.createMediaStreamSource(stream);
+      audioInput = realAudioInput;
+      audioInput.connect(inputPoint);
+
+      analyserNode = audioContext.createAnalyser();
+      analyserNode.fftSize = 2048;
+      inputPoint.connect( analyserNode );
+
+      audioRecorder = new Recorder( inputPoint );
+
+      zeroGain = audioContext.createGain();
+      zeroGain.gain.value = 0.0;
+      inputPoint.connect( zeroGain );
+      zeroGain.connect( audioContext.destination );
+      updateAnalysers();
+  }
+
+  function initAudio() {
+      if (!navigator.getUserMedia)
+          navigator.getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+      if (!navigator.cancelAnimationFrame)
+          navigator.cancelAnimationFrame = navigator.webkitCancelAnimationFrame || navigator.mozCancelAnimationFrame;
+      if (!navigator.requestAnimationFrame)
+          navigator.requestAnimationFrame = navigator.webkitRequestAnimationFrame || navigator.mozRequestAnimationFrame;
+
+      navigator.getUserMedia({audio:true}, gotStream, function(e) {
+          alert('Error getting audio');
+          console.log(e);
+      });
+  }
+
+
+  window.onload = function init() {
+
+      initAudio();
+    //try {
+
+      // webkit shim.
+      window.AudioContext = window.AudioContext || window.webkitAudioContext || window.mozAudioContext;
+
+      navigator.getUserMedia = (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia);
+
+      window.URL = window.URL || window.webkitURL;
+      
+      audioContext = new AudioContext;
+
+      //logHTML('Audio context set up.');
+      //logHTML('navigator.getUserMedia ' + (navigator.getUserMedia ? 'available.' : 'not present!'));
+
+    //} catch (e) {
+
+    //  alert('No web audio support in this browser!');
+
+    //}
+
+    
+    navigator.getUserMedia({vide:false, audio: true}, handlerStartUserMedia, handlerErrorUserMedia);
+
+  };
+
+  </script>
+
+   <script src="js/vendor/jquery-1.11.0.min.js"></script>
+  <script src="js/recorder.js"></script>
+
+</body>
+</html>
